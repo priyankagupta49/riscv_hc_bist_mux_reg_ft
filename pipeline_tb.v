@@ -187,13 +187,13 @@ release dut.memory.ResultSrcM;
         // -----------------------------
         // Final result check
         // -----------------------------
-//        #50;
-//        $display("\nFinal Result = %0d", result_w);
+        #50;
+        $display("\nFinal Result = %0d", result_w);
 
-//        if (result_w == 32'd8)
-//            $display("VERDICT: ALL SYSTEMS FUNCTIONAL");
-//        else
-//            $display("VERDICT: SYSTEM FAILURE");
+        if (result_w == 32'd8)
+            $display("VERDICT: ALL SYSTEMS FUNCTIONAL");
+        else
+            $display("VERDICT: SYSTEM FAILURE");
 
         // -----------------------------
         // WRITEBACK MUX FAULT TEST
@@ -201,7 +201,7 @@ release dut.memory.ResultSrcM;
         #1000;
         $display("\nInjecting Writeback MUX fault");
 
-        force dut.writeBack.result_mux.y1 = 32'h00000000;
+        force dut.writeBack.result_mux.y1 = ~dut.writeBack.result_mux.y1;
         #50;
 
         if (mux_error_flag)

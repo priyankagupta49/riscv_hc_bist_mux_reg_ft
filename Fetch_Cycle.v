@@ -5,15 +5,16 @@ module fetch_cycle (
     input [31:0] PC_Next_In,
     input imem_we,
     input [31:0] imem_waddr, imem_wdata,
-    input loader_done_in, // Added stall signal
+    input loader_done_in, 
     output s_err, d_err,
-    output [31:0] InstrD, PCPlus4D, PCD 
+    output [38:0] InstrD_ECC,   // 39-bit ECC Protected
+    output [38:0] PCPlus4D_ECC, 
+    output [38:0] PCD_ECC
 );
     wire [31:0] PCF, PCPlus4F, InstrF;
 
     PC_Module pc_inst (
-        .clk(clk),
-        .rst(rst),
+        .clk(clk), .rst(rst),
         .PC_Next(PC_Next_In),
         .loader_done_in(loader_done_in),
         .PC(PCF)
@@ -26,7 +27,9 @@ module fetch_cycle (
         .raddr(PCF), .rdata(InstrF), .s_err(s_err), .d_err(d_err)
     );
 
-    assign InstrD = InstrF;     
-    assign PCPlus4D = PCPlus4F;   
-    assign PCD = PCF;        
+    // ECC Encoders to protect data crossing the Fetch/Decode boundary
+    hamming_ecc_unit enc_instr (.data_in(InstrF),   .code_in(39'b0), .code_out(InstrD_ECC));
+    hamming_ecc_unit enc_pc4   (.data_in(PCPlus4F), .code_in(39'b0), .code_out(PCPlus4D_ECC));
+    hamming_ecc_unit enc_pc    (.data_in(PCF),      .code_in(39'b0), .code_out(PCD_ECC));
+
 endmodule

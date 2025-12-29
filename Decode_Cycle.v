@@ -1,99 +1,69 @@
 `timescale 1ns / 1ps
 module decode_cycle(
     input clk, rst,
-    
-    // Data inputs from IF stage and WB stage
-    input [31:0] InstrD, PCD, PCPlus4D, ResultW,
+    input [38:0] InstrD_ECC, PCD_ECC, PCPlus4D_ECC,
+    input [31:0] ResultW,
     input RegWriteW,
     input [4:0] RDW,
 
-    // Outputs to EX stage (ID/EX Register Outputs)
     output reg RegWriteE, ALUSrcE, MemWriteE, ResultSrcE, BranchE,
     output reg [2:0] ALUControlE,
-    output reg [31:0] RD1_E, RD2_E, Imm_Ext_E,
+    output reg [38:0] RD1_E_ECC, RD2_E_ECC, Imm_Ext_E_ECC,
     output reg [4:0] RS1_E, RS2_E, RD_E,
-    output reg [31:0] PCE, PCPlus4E,
-   
-    output [4:0] RS1_D, RS2_D // ADD THESE TWO PORTS HERE
+    output reg [38:0] PCE_ECC, PCPlus4E_ECC,
+    output [4:0] RS1_D, RS2_D
 );
 
-    // Internal wires for control signals
+    wire [31:0] InstrD, PCD, PCPlus4D;
+    wire [31:0] RD1_D, RD2_D, Imm_Ext_D;
     wire RegWriteD, ALUSrcD, MemWriteD, ResultSrcD, BranchD;
     wire [1:0] ImmSrcD;
     wire [2:0] ALUControlD;
-    wire [31:0] RD1_D, RD2_D;
-    
-    // Data wires - Explicitly 32-bit to fix VRFC 10-3091 warnings
-    wire [31:0] Imm_Ext_D;
-assign RS1_D = InstrD[19:15];
+
+    // Decoding/Correcting incoming Fetch data
+    hamming_ecc_unit dec_instr (.data_in(32'b0), .code_in(InstrD_ECC), .data_out(InstrD));
+    hamming_ecc_unit dec_pc    (.data_in(32'b0), .code_in(PCD_ECC),    .data_out(PCD));
+    hamming_ecc_unit dec_pc4   (.data_in(32'b0), .code_in(PCPlus4D_ECC), .data_out(PCPlus4D));
+
+    assign RS1_D = InstrD[19:15];
     assign RS2_D = InstrD[24:20];
-    // Control Unit
+
     Control_Unit_Top control (
-        .Op(InstrD[6:0]),
-        .RegWrite(RegWriteD),
-        .ImmSrc(ImmSrcD),
-        .ALUSrc(ALUSrcD),
-        .MemWrite(MemWriteD),
-        .ResultSrc(ResultSrcD),
-        .Branch(BranchD),
-        .funct3(InstrD[14:12]),
-        .funct7(InstrD[31:25]),
+        .Op(InstrD[6:0]), .RegWrite(RegWriteD), .ALUSrc(ALUSrcD),
+        .MemWrite(MemWriteD), .ResultSrc(ResultSrcD), .Branch(BranchD),
+        .ImmSrc(ImmSrcD), .funct3(InstrD[14:12]), .funct7(InstrD[31:25]), 
         .ALUControl(ALUControlD)
     );
 
-    // Register File (32-bit interface for CPU logic)
     Register_File rf (
-        .clk(clk),
-        .rst(rst),
-        .WE3(RegWriteW),
-        .WD3(ResultW),      // WD3 is now strictly 32-bit
-        .A1(InstrD[19:15]), // RS1
-        .A2(InstrD[24:20]), // RS2
-        .A3(RDW),
-        .RD1(RD1_D),        // RD1 is strictly 32-bit
-        .RD2(RD2_D)         // RD2 is strictly 32-bit
+        .clk(clk), .rst(rst), .WE3(RegWriteW), .WD3(ResultW),
+        .A1(RS1_D), .A2(RS2_D), .A3(RDW), .RD1(RD1_D), .RD2(RD2_D)
     );
 
-    // Sign Extension Unit
-    Sign_Extend extension (
-        .In(InstrD),
-        .Imm_Ext(Imm_Ext_D),
-        .ImmSrc(ImmSrcD)
-    );
+    Sign_Extend extension (.In(InstrD), .Imm_Ext(Imm_Ext_D), .ImmSrc(ImmSrcD));
 
-    // ID/EX Pipeline Registers 
-    always @(posedge clk) begin
-        if (rst == 1'b0) begin // Active-Low Reset
-            RegWriteE     <= 1'b0;
-            ALUSrcE        <= 1'b0;
-            MemWriteE      <= 1'b0;
-            ResultSrcE     <= 1'b0;
-            BranchE        <= 1'b0;
-            ALUControlE    <= 3'b000;
-            RD1_E          <= 32'h00000000;
-            RD2_E          <= 32'h00000000;
-            Imm_Ext_E      <= 32'h00000000;
-            RD_E           <= 5'h00;
-            PCE            <= 32'h00000000;
-            PCPlus4E       <= 32'h00000000;
-            RS1_E          <= 5'h00;
-            RS2_E          <= 5'h00;
+    // Encoding values for ID/EX Pipeline Registers
+    wire [38:0] rd1_enc, rd2_enc, imm_enc, pce_enc, pc4e_enc;
+    hamming_ecc_unit enc_rd1 (.data_in(RD1_D),     .code_in(39'b0), .code_out(rd1_enc));
+    hamming_ecc_unit enc_rd2 (.data_in(RD2_D),     .code_in(39'b0), .code_out(rd2_enc));
+    hamming_ecc_unit enc_imm (.data_in(Imm_Ext_D), .code_in(39'b0), .code_out(imm_enc));
+    hamming_ecc_unit enc_pce (.data_in(PCD),       .code_in(39'b0), .code_out(pce_enc));
+    hamming_ecc_unit enc_pc4 (.data_in(PCPlus4D),  .code_in(39'b0), .code_out(pc4e_enc));
+
+    always @(posedge clk or negedge rst) begin
+        if (rst == 1'b0) begin
+            RegWriteE <= 0; ALUSrcE <= 0; MemWriteE <= 0; ResultSrcE <= 0; BranchE <= 0;
+            ALUControlE <= 3'b0; RD1_E_ECC <= 39'b0; RD2_E_ECC <= 39'b0;
+            Imm_Ext_E_ECC <= 39'b0; RD_E <= 5'b0; PCE_ECC <= 39'b0;
+            PCPlus4E_ECC <= 39'b0; RS1_E <= 5'b0; RS2_E <= 5'b0;
         end else begin
-            RegWriteE      <= RegWriteD;
-            ALUSrcE        <= ALUSrcD;
-            MemWriteE      <= MemWriteD;
-            ResultSrcE     <= ResultSrcD;
-            BranchE        <= BranchD;
-            ALUControlE    <= ALUControlD;
-            RD1_E          <= RD1_D;
-            RD2_E          <= RD2_D;
-            Imm_Ext_E      <= Imm_Ext_D;
-            RD_E           <= InstrD[11:7];  // Destination Register (RD)
-            PCE            <= PCD;
-            PCPlus4E       <= PCPlus4D;
-            RS1_E          <= InstrD[19:15]; // Source Register 1 (RS1)
-            RS2_E          <= InstrD[24:20]; // Source Register 2 (RS2)
+            RegWriteE <= RegWriteD; ALUSrcE <= ALUSrcD;
+            MemWriteE <= MemWriteD; ResultSrcE <= ResultSrcD;
+            BranchE <= BranchD; ALUControlE <= ALUControlD;
+            RD1_E_ECC <= rd1_enc; RD2_E_ECC <= rd2_enc;
+            Imm_Ext_E_ECC <= imm_enc; RD_E <= InstrD[11:7];
+            PCE_ECC <= pce_enc; PCPlus4E_ECC <= pc4e_enc;
+            RS1_E <= RS1_D; RS2_E <= RS2_D;
         end
     end
-
 endmodule
